@@ -6,6 +6,13 @@ REGION ?= us-west-2
 TEMPLATE_FILE = cloudtrail-stack.yaml
 PROFILE ?= default
 
+# Detect CloudShell environment and adjust profile usage
+ifdef CLOUDSHELL
+    AWS_PROFILE_ARG =
+else
+    AWS_PROFILE_ARG = --profile $(PROFILE)
+endif
+
 # Parameters with defaults
 TRAIL_NAME ?= organization-cloudtrail
 S3_BUCKET_PREFIX ?= cloudtrail-logs
@@ -34,7 +41,7 @@ help: ## Show this help message
 	@echo "Variables:"
 	@echo "  $(YELLOW)STACK_NAME$(NC)            Stack name (default: $(STACK_NAME))"
 	@echo "  $(YELLOW)REGION$(NC)                AWS region (default: $(REGION))"
-	@echo "  $(YELLOW)PROFILE$(NC)               AWS profile (default: $(PROFILE))"
+	@echo "  $(YELLOW)PROFILE$(NC)               AWS profile (default: $(PROFILE), auto-detected in CloudShell)"
 	@echo "  $(YELLOW)TRAIL_NAME$(NC)            CloudTrail name (default: $(TRAIL_NAME))"
 	@echo "  $(YELLOW)RETENTION_DAYS$(NC)        S3 retention in days (default: $(RETENTION_DAYS))"
 	@echo "  $(YELLOW)LAKE_RETENTION_DAYS$(NC)   CloudTrail Lake retention (default: $(LAKE_RETENTION_DAYS))"
@@ -45,7 +52,7 @@ validate: ## Validate the CloudFormation template
 	@aws cloudformation validate-template \
 		--template-body file://$(TEMPLATE_FILE) \
 		--region $(REGION) \
-		--profile $(PROFILE) \
+		$(AWS_PROFILE_ARG) \
 		--output text
 	@echo "$(GREEN)✓ Template is valid$(NC)"
 
@@ -66,7 +73,7 @@ create: validate ## Create the CloudTrail stack
 			ParameterKey=EnableS3DataEvents,ParameterValue=$(ENABLE_S3_DATA_EVENTS) \
 		--capabilities CAPABILITY_NAMED_IAM \
 		--region $(REGION) \
-		--profile $(PROFILE) \
+		$(AWS_PROFILE_ARG) \
 		--output text
 	@echo "$(YELLOW)Stack creation initiated. Run 'make status' to check progress$(NC)"
 
@@ -87,7 +94,7 @@ update: validate ## Update the CloudTrail stack
 			ParameterKey=EnableS3DataEvents,ParameterValue=$(ENABLE_S3_DATA_EVENTS) \
 		--capabilities CAPABILITY_NAMED_IAM \
 		--region $(REGION) \
-		--profile $(PROFILE) \
+		$(AWS_PROFILE_ARG) \
 		--output text || echo "$(YELLOW)No updates to perform$(NC)"
 
 .PHONY: delete
@@ -99,7 +106,7 @@ delete: ## Delete the CloudTrail stack
 	@aws cloudformation delete-stack \
 		--stack-name $(STACK_NAME) \
 		--region $(REGION) \
-		--profile $(PROFILE)
+		$(AWS_PROFILE_ARG)
 	@echo "$(YELLOW)Stack deletion initiated. Run 'make status' to check progress$(NC)"
 
 .PHONY: status
@@ -108,7 +115,7 @@ status: ## Check stack status
 	@aws cloudformation describe-stacks \
 		--stack-name $(STACK_NAME) \
 		--region $(REGION) \
-		--profile $(PROFILE) \
+		$(AWS_PROFILE_ARG) \
 		--query 'Stacks[0].StackStatus' \
 		--output text 2>/dev/null || echo "Stack not found"
 
@@ -118,7 +125,7 @@ events: ## Show recent stack events
 	@aws cloudformation describe-stack-events \
 		--stack-name $(STACK_NAME) \
 		--region $(REGION) \
-		--profile $(PROFILE) \
+		$(AWS_PROFILE_ARG) \
 		--max-items 10 \
 		--query 'StackEvents[*].[Timestamp,ResourceStatus,ResourceType,LogicalResourceId,ResourceStatusReason]' \
 		--output table
@@ -129,7 +136,7 @@ outputs: ## Show stack outputs
 	@aws cloudformation describe-stacks \
 		--stack-name $(STACK_NAME) \
 		--region $(REGION) \
-		--profile $(PROFILE) \
+		$(AWS_PROFILE_ARG) \
 		--query 'Stacks[0].Outputs[*].[OutputKey,OutputValue,Description]' \
 		--output table
 
@@ -139,7 +146,7 @@ wait-create: ## Wait for stack creation to complete
 	@aws cloudformation wait stack-create-complete \
 		--stack-name $(STACK_NAME) \
 		--region $(REGION) \
-		--profile $(PROFILE)
+		$(AWS_PROFILE_ARG)
 	@echo "$(GREEN)✓ Stack creation complete$(NC)"
 
 .PHONY: wait-update
@@ -148,7 +155,7 @@ wait-update: ## Wait for stack update to complete
 	@aws cloudformation wait stack-update-complete \
 		--stack-name $(STACK_NAME) \
 		--region $(REGION) \
-		--profile $(PROFILE)
+		$(AWS_PROFILE_ARG)
 	@echo "$(GREEN)✓ Stack update complete$(NC)"
 
 .PHONY: wait-delete
@@ -157,7 +164,7 @@ wait-delete: ## Wait for stack deletion to complete
 	@aws cloudformation wait stack-delete-complete \
 		--stack-name $(STACK_NAME) \
 		--region $(REGION) \
-		--profile $(PROFILE)
+		$(AWS_PROFILE_ARG)
 	@echo "$(GREEN)✓ Stack deletion complete$(NC)"
 
 .PHONY: describe
@@ -165,7 +172,7 @@ describe: ## Describe the stack in detail
 	@aws cloudformation describe-stacks \
 		--stack-name $(STACK_NAME) \
 		--region $(REGION) \
-		--profile $(PROFILE) \
+		$(AWS_PROFILE_ARG) \
 		--output json
 
 .PHONY: estimate-cost
@@ -188,7 +195,7 @@ trail-status: ## Check CloudTrail logging status
 	@aws cloudtrail get-trail-status \
 		--name $(TRAIL_NAME) \
 		--region $(REGION) \
-		--profile $(PROFILE) \
+		$(AWS_PROFILE_ARG) \
 		--output json 2>/dev/null || echo "Trail not found or not accessible"
 
 .PHONY: start-logging
@@ -197,7 +204,7 @@ start-logging: ## Start CloudTrail logging
 	@aws cloudtrail start-logging \
 		--name $(TRAIL_NAME) \
 		--region $(REGION) \
-		--profile $(PROFILE)
+		$(AWS_PROFILE_ARG)
 	@echo "$(GREEN)✓ Logging started$(NC)"
 
 .PHONY: stop-logging
@@ -206,7 +213,7 @@ stop-logging: ## Stop CloudTrail logging
 	@aws cloudtrail stop-logging \
 		--name $(TRAIL_NAME) \
 		--region $(REGION) \
-		--profile $(PROFILE)
+		$(AWS_PROFILE_ARG)
 	@echo "$(YELLOW)✓ Logging stopped$(NC)"
 
 .PHONY: lookup-events
@@ -215,7 +222,7 @@ lookup-events: ## Lookup recent CloudTrail events (last 10)
 	@aws cloudtrail lookup-events \
 		--max-items 10 \
 		--region $(REGION) \
-		--profile $(PROFILE) \
+		$(AWS_PROFILE_ARG) \
 		--query 'Events[*].[EventTime,EventName,Username,EventSource]' \
 		--output table
 
