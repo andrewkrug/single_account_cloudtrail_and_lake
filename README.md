@@ -132,6 +132,7 @@ aws cloudformation update-stack \
 RetentionInDays: 30
 CloudTrailLakeRetentionDays: 7
 EnableS3DataEvents: false
+RandomSuffix: auto  # Auto-generates unique suffix
 ```
 
 #### For Production Environments
@@ -140,6 +141,7 @@ RetentionInDays: 90
 CloudTrailLakeRetentionDays: 30
 EnableS3DataEvents: true
 EnableLogFileValidation: true
+RandomSuffix: prod-$(date +%Y%m%d)  # Date-based suffix
 ```
 
 #### For Compliance Requirements
@@ -148,7 +150,26 @@ RetentionInDays: 2557  # 7 years
 CloudTrailLakeRetentionDays: 365
 EnableS3DataEvents: true
 EnableLogFileValidation: true
+RandomSuffix: compliance-$(date +%Y%m%d)
 ```
+
+### Resource Naming and Conflict Prevention
+
+**Enhanced Randomization**: All resource names now include Account ID for better uniqueness:
+
+- **KMS Key Alias**: `alias/{TrailName}-kms-key-{StackName}-{AccountId}`
+- **S3 Buckets**: `{Prefix}-{StackName}-{AccountId}-{Region}`
+- **CloudTrail**: `{TrailName}-{StackName}-{AccountId}`
+- **CloudTrail Lake**: `{TrailName}-lake-store-{StackName}-{AccountId}`
+- **IAM Roles**: `{TrailName}-cloudwatch-role-{StackName}-{AccountId}`
+- **Log Groups**: `/aws/cloudtrail/{TrailName}-{StackName}-{AccountId}`
+- **CloudWatch Alarms**: `{TrailName}-{alarm-type}-{StackName}-{AccountId}`
+
+This ensures:
+✅ **No conflicts** when deploying multiple stacks in same account
+✅ **Global uniqueness** for S3 buckets across all AWS accounts
+✅ **Predictable naming** while maintaining uniqueness
+✅ **Easy identification** of resources by account and stack
 
 ## Design Decisions
 

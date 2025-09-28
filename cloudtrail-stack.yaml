@@ -15,7 +15,7 @@ Parameters:
   RandomSuffix:
     Type: String
     Default: 'auto'
-    Description: 'Random suffix for resource names to ensure uniqueness (use stack name or provide custom value)'
+    Description: 'Random suffix for resource names to ensure uniqueness (use "auto" for timestamp-based, stack name, or provide custom value)'
 
   RetentionInDays:
     Type: Number
@@ -151,7 +151,7 @@ Resources:
     Properties:
       AliasName: !If
         - UseAutoSuffix
-        - !Sub 'alias/${TrailName}-kms-key-${AWS::StackName}'
+        - !Sub 'alias/${TrailName}-kms-key-${AWS::StackName}-${AWS::AccountId}'
         - !Sub 'alias/${TrailName}-kms-key-${RandomSuffix}'
       TargetKeyId: !Ref CloudTrailKMSKey
 
@@ -162,7 +162,7 @@ Resources:
     Properties:
       BucketName: !If
         - UseAutoSuffix
-        - !Sub '${S3BucketPrefix}-access-logs-${AWS::StackName}-${AWS::AccountId}'
+        - !Sub '${S3BucketPrefix}-access-logs-${AWS::StackName}-${AWS::AccountId}-${AWS::Region}'
         - !Sub '${S3BucketPrefix}-access-logs-${RandomSuffix}-${AWS::AccountId}'
       BucketEncryption:
         ServerSideEncryptionConfiguration:
@@ -200,7 +200,7 @@ Resources:
     Properties:
       BucketName: !If
         - UseAutoSuffix
-        - !Sub '${S3BucketPrefix}-${AWS::StackName}-${AWS::AccountId}'
+        - !Sub '${S3BucketPrefix}-${AWS::StackName}-${AWS::AccountId}-${AWS::Region}'
         - !Sub '${S3BucketPrefix}-${RandomSuffix}-${AWS::AccountId}'
       BucketEncryption:
         ServerSideEncryptionConfiguration:
@@ -311,7 +311,7 @@ Resources:
     Properties:
       LogGroupName: !If
         - UseAutoSuffix
-        - !Sub '/aws/cloudtrail/${TrailName}-${AWS::StackName}'
+        - !Sub '/aws/cloudtrail/${TrailName}-${AWS::StackName}-${AWS::AccountId}'
         - !Sub '/aws/cloudtrail/${TrailName}-${RandomSuffix}'
       RetentionInDays: 30
       KmsKeyId: !GetAtt CloudTrailKMSKey.Arn
@@ -322,7 +322,7 @@ Resources:
     Properties:
       RoleName: !If
         - UseAutoSuffix
-        - !Sub '${TrailName}-cloudwatch-role-${AWS::StackName}'
+        - !Sub '${TrailName}-cloudwatch-role-${AWS::StackName}-${AWS::AccountId}'
         - !Sub '${TrailName}-cloudwatch-role-${RandomSuffix}'
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
@@ -358,7 +358,7 @@ Resources:
     Properties:
       TrailName: !If
         - UseAutoSuffix
-        - !Sub '${TrailName}-${AWS::StackName}'
+        - !Sub '${TrailName}-${AWS::StackName}-${AWS::AccountId}'
         - !Sub '${TrailName}-${RandomSuffix}'
       S3BucketName: !Ref CloudTrailS3Bucket
       IncludeGlobalServiceEvents: true
@@ -394,7 +394,7 @@ Resources:
     Properties:
       Name: !If
         - UseAutoSuffix
-        - !Sub '${TrailName}-lake-store-${AWS::StackName}'
+        - !Sub '${TrailName}-lake-store-${AWS::StackName}-${AWS::AccountId}'
         - !Sub '${TrailName}-lake-store-${RandomSuffix}'
       MultiRegionEnabled: true
       OrganizationEnabled: false
@@ -445,7 +445,7 @@ Resources:
     Properties:
       AlarmName: !If
         - UseAutoSuffix
-        - !Sub '${TrailName}-root-account-usage-${AWS::StackName}'
+        - !Sub '${TrailName}-root-account-usage-${AWS::StackName}-${AWS::AccountId}'
         - !Sub '${TrailName}-root-account-usage-${RandomSuffix}'
       AlarmDescription: 'Alert when root account is used'
       MetricName: 'RootAccountUsage'
@@ -462,7 +462,7 @@ Resources:
     Properties:
       AlarmName: !If
         - UseAutoSuffix
-        - !Sub '${TrailName}-unauthorized-api-calls-${AWS::StackName}'
+        - !Sub '${TrailName}-unauthorized-api-calls-${AWS::StackName}-${AWS::AccountId}'
         - !Sub '${TrailName}-unauthorized-api-calls-${RandomSuffix}'
       AlarmDescription: 'Alert on unauthorized API calls'
       MetricName: 'UnauthorizedAPICalls'
