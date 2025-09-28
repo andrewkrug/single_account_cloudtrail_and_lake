@@ -117,6 +117,7 @@ aws cloudformation update-stack \
 |-----------|---------|-------------|--------------|
 | `TrailName` | organization-cloudtrail | Name for the CloudTrail | Any valid string |
 | `S3BucketPrefix` | cloudtrail-logs | Prefix for S3 bucket naming | Any valid S3 prefix |
+| `RandomSuffix` | auto | Random suffix for resource names | auto (uses stack name) or custom string |
 | `RetentionInDays` | 90 | Days to retain logs in S3 | 1-3653 |
 | `GlacierTransitionDays` | 30 | Days before Glacier transition | 1-3653 |
 | `DeepArchiveTransitionDays` | 60 | Days before Deep Archive | 1-3653 |
@@ -218,6 +219,39 @@ EnableLogFileValidation: true
 - ✅ **Key Rotation**: Automatic KMS key rotation
 - ✅ **Least Privilege**: Minimal IAM permissions
 - ✅ **Monitoring**: CloudWatch alarms for suspicious activity
+- ✅ **Unpredictable S3 Bucket Names**: Non-guessable bucket naming to prevent enumeration attacks
+- ✅ **Multi-Stack Deployment**: Unique resource names allowing multiple deployments
+- ✅ **Auto-Cleanup**: S3 buckets configured for deletion even when containing files
+
+### Security Enhancements
+
+#### S3 Bucket Name Randomization
+To prevent bucket enumeration attacks, S3 bucket names use unpredictable patterns:
+
+**Before**: `cloudtrail-logs-123456789012-us-west-2` (easily guessable)
+**After**: `cloudtrail-logs-my-stack-name-123456789012` (unpredictable)
+
+- Uses CloudFormation stack name (contains random UUID) or custom random suffix
+- Eliminates predictable region-based naming
+- Prevents attackers from guessing bucket names for reconnaissance
+
+#### Multi-Stack Deployment Support
+All resource names include randomization to prevent conflicts:
+
+- CloudTrail names: `organization-cloudtrail-{stack-name}`
+- KMS key aliases: `alias/organization-cloudtrail-kms-key-{stack-name}`
+- CloudWatch log groups: `/aws/cloudtrail/organization-cloudtrail-{stack-name}`
+- CloudTrail Lake stores: `organization-cloudtrail-lake-store-{stack-name}`
+
+This enables:
+- Multiple deployments in the same account (dev/staging/prod)
+- Testing and development environments
+- Blue/green deployment strategies
+
+#### Stack Cleanup Improvements
+- S3 buckets configured with `DeletionPolicy: Delete`
+- Automatic cleanup even when buckets contain files
+- Prevents orphaned resources and incomplete deletions
 
 ### Additional Recommendations
 

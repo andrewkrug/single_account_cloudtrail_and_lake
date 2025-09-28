@@ -12,6 +12,11 @@ Parameters:
     Default: 'cloudtrail-logs'
     Description: 'Prefix for S3 bucket name (account ID and region will be appended)'
 
+  RandomSuffix:
+    Type: String
+    Default: 'auto'
+    Description: 'Random suffix for resource names to ensure uniqueness (use stack name or provide custom value)'
+
   RetentionInDays:
     Type: Number
     Default: 90
@@ -53,6 +58,7 @@ Parameters:
 
 Conditions:
   EnableDataEvents: !Equals [!Ref EnableS3DataEvents, 'true']
+  UseAutoSuffix: !Equals [!Ref RandomSuffix, 'auto']
 
 Resources:
   # KMS Key for CloudTrail encryption
@@ -112,6 +118,24 @@ Resources:
             Condition:
               ArnLike:
                 'kms:EncryptionContext:aws:logs:arn': !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:*'
+
+          - Sid: 'Allow CloudTrail Lake Event Data Store Encryption'
+            Effect: Allow
+            Principal:
+              Service: cloudtrail.amazonaws.com
+            Action:
+              - 'kms:GenerateDataKey'
+              - 'kms:Decrypt'
+            Resource: '*'
+
+          - Sid: 'Allow Root Account for CloudTrail Lake Management'
+            Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+            Action:
+              - 'kms:Decrypt'
+              - 'kms:GenerateDataKey'
+            Resource: '*'
       EnableKeyRotation: true
       PendingWindowInDays: 30
       Tags:
@@ -125,14 +149,21 @@ Resources:
   CloudTrailKMSKeyAlias:
     Type: AWS::KMS::Alias
     Properties:
-      AliasName: !Sub 'alias/${TrailName}-kms-key'
+      AliasName: !If
+        - UseAutoSuffix
+        - !Sub 'alias/${TrailName}-kms-key-${AWS::StackName}'
+        - !Sub 'alias/${TrailName}-kms-key-${RandomSuffix}'
       TargetKeyId: !Ref CloudTrailKMSKey
 
   # S3 Bucket for Access Logs (separate bucket for security best practice)
   LoggingBucket:
     Type: AWS::S3::Bucket
+    DeletionPolicy: Delete
     Properties:
-      BucketName: !Sub '${S3BucketPrefix}-access-logs-${AWS::AccountId}-${AWS::Region}'
+      BucketName: !If
+        - UseAutoSuffix
+        - !Sub '${S3BucketPrefix}-access-logs-${AWS::StackName}-${AWS::AccountId}'
+        - !Sub '${S3BucketPrefix}-access-logs-${RandomSuffix}-${AWS::AccountId}'
       BucketEncryption:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault:
@@ -164,9 +195,13 @@ Resources:
   # S3 Bucket for CloudTrail
   CloudTrailS3Bucket:
     Type: AWS::S3::Bucket
+    DeletionPolicy: Delete
     DependsOn: LoggingBucket
     Properties:
-      BucketName: !Sub '${S3BucketPrefix}-${AWS::AccountId}-${AWS::Region}'
+      BucketName: !If
+        - UseAutoSuffix
+        - !Sub '${S3BucketPrefix}-${AWS::StackName}-${AWS::AccountId}'
+        - !Sub '${S3BucketPrefix}-${RandomSuffix}-${AWS::AccountId}'
       BucketEncryption:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault:
@@ -189,7 +224,7 @@ Resources:
           - Id: 'TransitionToIA'
             Status: 'Enabled'
             Transitions:
-              - TransitionInDays: 7
+              - TransitionInDays: 30
                 StorageClass: 'STANDARD_IA'
           - Id: 'TransitionToGlacier'
             Status: 'Enabled'
@@ -274,7 +309,10 @@ Resources:
   CloudTrailLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
-      LogGroupName: !Sub '/aws/cloudtrail/${TrailName}'
+      LogGroupName: !If
+        - UseAutoSuffix
+        - !Sub '/aws/cloudtrail/${TrailName}-${AWS::StackName}'
+        - !Sub '/aws/cloudtrail/${TrailName}-${RandomSuffix}'
       RetentionInDays: 30
       KmsKeyId: !GetAtt CloudTrailKMSKey.Arn
 
@@ -282,7 +320,10 @@ Resources:
   CloudTrailLogRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: !Sub '${TrailName}-cloudwatch-role'
+      RoleName: !If
+        - UseAutoSuffix
+        - !Sub '${TrailName}-cloudwatch-role-${AWS::StackName}'
+        - !Sub '${TrailName}-cloudwatch-role-${RandomSuffix}'
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -315,7 +356,10 @@ Resources:
       - CloudTrailS3BucketPolicy
       - CloudTrailLogRole
     Properties:
-      TrailName: !Ref TrailName
+      TrailName: !If
+        - UseAutoSuffix
+        - !Sub '${TrailName}-${AWS::StackName}'
+        - !Sub '${TrailName}-${RandomSuffix}'
       S3BucketName: !Ref CloudTrailS3Bucket
       IncludeGlobalServiceEvents: true
       IsLogging: true
@@ -348,7 +392,10 @@ Resources:
   CloudTrailLakeEventDataStore:
     Type: AWS::CloudTrail::EventDataStore
     Properties:
-      Name: !Sub '${TrailName}-lake-store'
+      Name: !If
+        - UseAutoSuffix
+        - !Sub '${TrailName}-lake-store-${AWS::StackName}'
+        - !Sub '${TrailName}-lake-store-${RandomSuffix}'
       MultiRegionEnabled: true
       OrganizationEnabled: false
       RetentionPeriod: !Ref CloudTrailLakeRetentionDays
@@ -396,7 +443,10 @@ Resources:
   RootAccountUsageAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
-      AlarmName: !Sub '${TrailName}-root-account-usage'
+      AlarmName: !If
+        - UseAutoSuffix
+        - !Sub '${TrailName}-root-account-usage-${AWS::StackName}'
+        - !Sub '${TrailName}-root-account-usage-${RandomSuffix}'
       AlarmDescription: 'Alert when root account is used'
       MetricName: 'RootAccountUsage'
       Namespace: 'CloudTrailMetrics'
@@ -410,7 +460,10 @@ Resources:
   UnauthorizedAPICallsAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
-      AlarmName: !Sub '${TrailName}-unauthorized-api-calls'
+      AlarmName: !If
+        - UseAutoSuffix
+        - !Sub '${TrailName}-unauthorized-api-calls-${AWS::StackName}'
+        - !Sub '${TrailName}-unauthorized-api-calls-${RandomSuffix}'
       AlarmDescription: 'Alert on unauthorized API calls'
       MetricName: 'UnauthorizedAPICalls'
       Namespace: 'CloudTrailMetrics'
@@ -477,7 +530,7 @@ Outputs:
 
   CloudTrailLakeEventDataStoreArn:
     Description: 'CloudTrail Lake Event Data Store ARN'
-    Value: !GetAtt CloudTrailLakeEventDataStore.Arn
+    Value: !GetAtt CloudTrailLakeEventDataStore.EventDataStoreArn
     Export:
       Name: !Sub '${AWS::StackName}-lake-store-arn'
 
