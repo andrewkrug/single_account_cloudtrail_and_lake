@@ -1,0 +1,482 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'CloudTrail with S3, KMS encryption, lifecycle policies, and CloudTrail Lake - Best Practices Implementation'
+
+Parameters:
+  TrailName:
+    Type: String
+    Default: 'organization-cloudtrail'
+    Description: 'Name for the CloudTrail'
+
+  S3BucketPrefix:
+    Type: String
+    Default: 'cloudtrail-logs'
+    Description: 'Prefix for S3 bucket name (account ID and region will be appended)'
+
+  RetentionInDays:
+    Type: Number
+    Default: 90
+    Description: 'Number of days to retain logs in S3 before deletion'
+    MinValue: 1
+    MaxValue: 3653
+
+  GlacierTransitionDays:
+    Type: Number
+    Default: 30
+    Description: 'Number of days before transitioning to Glacier'
+    MinValue: 1
+    MaxValue: 3653
+
+  DeepArchiveTransitionDays:
+    Type: Number
+    Default: 60
+    Description: 'Number of days before transitioning to Deep Archive'
+    MinValue: 1
+    MaxValue: 3653
+
+  CloudTrailLakeRetentionDays:
+    Type: Number
+    Default: 7
+    Description: 'CloudTrail Lake retention period in days (7 for cost optimization)'
+    AllowedValues: [7, 30, 90, 365, 2557]
+
+  EnableLogFileValidation:
+    Type: String
+    Default: 'true'
+    AllowedValues: ['true', 'false']
+    Description: 'Enable log file integrity validation'
+
+  EnableS3DataEvents:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: 'Enable S3 data events logging (increases cost)'
+
+Conditions:
+  EnableDataEvents: !Equals [!Ref EnableS3DataEvents, 'true']
+
+Resources:
+  # KMS Key for CloudTrail encryption
+  CloudTrailKMSKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: 'KMS key for CloudTrail encryption'
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: 'Enable IAM User Permissions'
+            Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+            Action: 'kms:*'
+            Resource: '*'
+
+          - Sid: 'Allow CloudTrail to encrypt logs'
+            Effect: Allow
+            Principal:
+              Service: cloudtrail.amazonaws.com
+            Action:
+              - 'kms:GenerateDataKey*'
+              - 'kms:DescribeKey'
+            Resource: '*'
+            Condition:
+              StringLike:
+                'kms:EncryptionContext:aws:cloudtrail:arn': !Sub 'arn:aws:cloudtrail:${AWS::Region}:${AWS::AccountId}:trail/${TrailName}'
+
+          - Sid: 'Allow CloudTrail to decrypt logs'
+            Effect: Allow
+            Principal:
+              Service: cloudtrail.amazonaws.com
+            Action:
+              - 'kms:Decrypt'
+              - 'kms:ReEncrypt*'
+              - 'kms:GenerateDataKey*'
+              - 'kms:CreateGrant'
+              - 'kms:DescribeKey'
+            Resource: '*'
+            Condition:
+              StringEquals:
+                'kms:CallerAccount': !Ref AWS::AccountId
+
+          - Sid: 'Allow CloudWatch Logs'
+            Effect: Allow
+            Principal:
+              Service: !Sub 'logs.${AWS::Region}.amazonaws.com'
+            Action:
+              - 'kms:Encrypt'
+              - 'kms:Decrypt'
+              - 'kms:ReEncrypt*'
+              - 'kms:GenerateDataKey*'
+              - 'kms:CreateGrant'
+              - 'kms:DescribeKey'
+            Resource: '*'
+            Condition:
+              ArnLike:
+                'kms:EncryptionContext:aws:logs:arn': !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:*'
+      EnableKeyRotation: true
+      PendingWindowInDays: 30
+      Tags:
+        - Key: Name
+          Value: !Sub '${TrailName}-kms-key'
+        - Key: Purpose
+          Value: 'CloudTrail Encryption'
+        - Key: ManagedBy
+          Value: 'CloudFormation'
+
+  CloudTrailKMSKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub 'alias/${TrailName}-kms-key'
+      TargetKeyId: !Ref CloudTrailKMSKey
+
+  # S3 Bucket for Access Logs (separate bucket for security best practice)
+  LoggingBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub '${S3BucketPrefix}-access-logs-${AWS::AccountId}-${AWS::Region}'
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: 'AES256'
+      AccessControl: 'LogDeliveryWrite'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: 'Enabled'
+      LifecycleConfiguration:
+        Rules:
+          - Id: 'DeleteOldAccessLogs'
+            Status: 'Enabled'
+            ExpirationInDays: 30
+      Tags:
+        - Key: Name
+          Value: !Sub '${TrailName}-access-logs'
+        - Key: Purpose
+          Value: 'S3 Access Logs'
+        - Key: ManagedBy
+          Value: 'CloudFormation'
+
+  # S3 Bucket for CloudTrail
+  CloudTrailS3Bucket:
+    Type: AWS::S3::Bucket
+    DependsOn: LoggingBucket
+    Properties:
+      BucketName: !Sub '${S3BucketPrefix}-${AWS::AccountId}-${AWS::Region}'
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: 'aws:kms'
+              KMSMasterKeyID: !GetAtt CloudTrailKMSKey.Arn
+            BucketKeyEnabled: true
+      LoggingConfiguration:
+        DestinationBucketName: !Ref LoggingBucket
+        LogFilePrefix: 'cloudtrail-bucket-logs/'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: 'Enabled'
+      ObjectLockEnabled: false
+      LifecycleConfiguration:
+        Rules:
+          - Id: 'TransitionToIA'
+            Status: 'Enabled'
+            Transitions:
+              - TransitionInDays: 7
+                StorageClass: 'STANDARD_IA'
+          - Id: 'TransitionToGlacier'
+            Status: 'Enabled'
+            Transitions:
+              - TransitionInDays: !Ref GlacierTransitionDays
+                StorageClass: 'GLACIER_IR'
+          - Id: 'TransitionToDeepArchive'
+            Status: 'Enabled'
+            Transitions:
+              - TransitionInDays: !Ref DeepArchiveTransitionDays
+                StorageClass: 'DEEP_ARCHIVE'
+          - Id: 'ExpireOldLogs'
+            Status: 'Enabled'
+            ExpirationInDays: !Ref RetentionInDays
+          - Id: 'DeleteIncompleteMultipartUploads'
+            Status: 'Enabled'
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 7
+          - Id: 'DeleteOldVersions'
+            Status: 'Enabled'
+            NoncurrentVersionExpirationInDays: 30
+      NotificationConfiguration:
+        QueueConfigurations: []
+        TopicConfigurations: []
+        LambdaConfigurations: []
+      Tags:
+        - Key: Name
+          Value: !Sub '${TrailName}-logs'
+        - Key: Purpose
+          Value: 'CloudTrail Storage'
+        - Key: ManagedBy
+          Value: 'CloudFormation'
+
+  # S3 Bucket Policy for CloudTrail
+  CloudTrailS3BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref CloudTrailS3Bucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: 'AWSCloudTrailAclCheck'
+            Effect: Allow
+            Principal:
+              Service: cloudtrail.amazonaws.com
+            Action: 's3:GetBucketAcl'
+            Resource: !GetAtt CloudTrailS3Bucket.Arn
+
+          - Sid: 'AWSCloudTrailWrite'
+            Effect: Allow
+            Principal:
+              Service: cloudtrail.amazonaws.com
+            Action: 's3:PutObject'
+            Resource: !Sub '${CloudTrailS3Bucket.Arn}/*'
+            Condition:
+              StringEquals:
+                's3:x-amz-acl': 'bucket-owner-full-control'
+                's3:x-amz-server-side-encryption': 'aws:kms'
+                's3:x-amz-server-side-encryption-aws-kms-key-id': !GetAtt CloudTrailKMSKey.Arn
+
+          - Sid: 'DenyUnencryptedObjectUploads'
+            Effect: Deny
+            Principal: '*'
+            Action: 's3:PutObject'
+            Resource: !Sub '${CloudTrailS3Bucket.Arn}/*'
+            Condition:
+              StringNotEquals:
+                's3:x-amz-server-side-encryption': 'aws:kms'
+
+          - Sid: 'DenyInsecureTransport'
+            Effect: Deny
+            Principal: '*'
+            Action: 's3:*'
+            Resource:
+              - !GetAtt CloudTrailS3Bucket.Arn
+              - !Sub '${CloudTrailS3Bucket.Arn}/*'
+            Condition:
+              Bool:
+                'aws:SecureTransport': 'false'
+
+  # CloudWatch Logs Group for CloudTrail
+  CloudTrailLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/cloudtrail/${TrailName}'
+      RetentionInDays: 30
+      KmsKeyId: !GetAtt CloudTrailKMSKey.Arn
+
+  # IAM Role for CloudTrail to write to CloudWatch Logs
+  CloudTrailLogRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${TrailName}-cloudwatch-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: cloudtrail.amazonaws.com
+            Action: 'sts:AssumeRole'
+      Policies:
+        - PolicyName: 'CloudTrailLogStreamPolicy'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'logs:CreateLogStream'
+                  - 'logs:PutLogEvents'
+                Resource: !GetAtt CloudTrailLogGroup.Arn
+      Tags:
+        - Key: Name
+          Value: !Sub '${TrailName}-log-role'
+        - Key: Purpose
+          Value: 'CloudTrail CloudWatch Integration'
+        - Key: ManagedBy
+          Value: 'CloudFormation'
+
+  # CloudTrail
+  CloudTrail:
+    Type: AWS::CloudTrail::Trail
+    DependsOn:
+      - CloudTrailS3BucketPolicy
+      - CloudTrailLogRole
+    Properties:
+      TrailName: !Ref TrailName
+      S3BucketName: !Ref CloudTrailS3Bucket
+      IncludeGlobalServiceEvents: true
+      IsLogging: true
+      IsMultiRegionTrail: true
+      EnableLogFileValidation: !Ref EnableLogFileValidation
+      KMSKeyId: !GetAtt CloudTrailKMSKey.Arn
+      CloudWatchLogsLogGroupArn: !GetAtt CloudTrailLogGroup.Arn
+      CloudWatchLogsRoleArn: !GetAtt CloudTrailLogRole.Arn
+      EventSelectors:
+        - ReadWriteType: 'All'
+          IncludeManagementEvents: true
+          DataResources: !If
+            - EnableDataEvents
+            - - Type: 'AWS::S3::Object'
+                Values:
+                  - 'arn:aws:s3:::*/\*'
+            - !Ref AWS::NoValue
+      InsightSelectors:
+        - InsightType: 'ApiCallRateInsight'
+        - InsightType: 'ApiErrorRateInsight'
+      Tags:
+        - Key: Name
+          Value: !Ref TrailName
+        - Key: Purpose
+          Value: 'Audit and Compliance'
+        - Key: ManagedBy
+          Value: 'CloudFormation'
+
+  # CloudTrail Lake Event Data Store
+  CloudTrailLakeEventDataStore:
+    Type: AWS::CloudTrail::EventDataStore
+    Properties:
+      Name: !Sub '${TrailName}-lake-store'
+      MultiRegionEnabled: true
+      OrganizationEnabled: false
+      RetentionPeriod: !Ref CloudTrailLakeRetentionDays
+      TerminationProtectionEnabled: false
+      AdvancedEventSelectors:
+        - Name: 'ManagementEvents'
+          FieldSelectors:
+            - Field: 'eventCategory'
+              Equals:
+                - 'Management'
+        - Name: 'DataEvents'
+          FieldSelectors:
+            - Field: 'eventCategory'
+              Equals:
+                - 'Data'
+            - Field: 'resources.type'
+              Equals:
+                - 'AWS::S3::Object'
+                - 'AWS::Lambda::Function'
+                - 'AWS::DynamoDB::Table'
+      KmsKeyId: !GetAtt CloudTrailKMSKey.Arn
+      Tags:
+        - Key: Name
+          Value: !Sub '${TrailName}-lake'
+        - Key: Purpose
+          Value: 'CloudTrail Lake Analytics'
+        - Key: ManagedBy
+          Value: 'CloudFormation'
+
+  # CloudWatch Alarms for monitoring
+  RootAccountUsageAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${TrailName}-root-account-usage'
+      AlarmDescription: 'Alert when root account is used'
+      MetricName: 'RootAccountUsage'
+      Namespace: 'CloudTrailMetrics'
+      Statistic: 'Sum'
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: 'GreaterThanOrEqualToThreshold'
+      TreatMissingData: 'notBreaching'
+
+  UnauthorizedAPICallsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${TrailName}-unauthorized-api-calls'
+      AlarmDescription: 'Alert on unauthorized API calls'
+      MetricName: 'UnauthorizedAPICalls'
+      Namespace: 'CloudTrailMetrics'
+      Statistic: 'Sum'
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 5
+      ComparisonOperator: 'GreaterThanOrEqualToThreshold'
+      TreatMissingData: 'notBreaching'
+
+  # Metric Filters for CloudWatch Logs
+  RootAccountUsageMetricFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      FilterPattern: '{ $.userIdentity.type = "Root" }'
+      LogGroupName: !Ref CloudTrailLogGroup
+      MetricTransformations:
+        - MetricName: 'RootAccountUsage'
+          MetricNamespace: 'CloudTrailMetrics'
+          MetricValue: '1'
+          DefaultValue: 0
+
+  UnauthorizedAPICallsMetricFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      FilterPattern: '{ ($.errorCode = "*UnauthorizedOperation") || ($.errorCode = "AccessDenied*") }'
+      LogGroupName: !Ref CloudTrailLogGroup
+      MetricTransformations:
+        - MetricName: 'UnauthorizedAPICalls'
+          MetricNamespace: 'CloudTrailMetrics'
+          MetricValue: '1'
+          DefaultValue: 0
+
+Outputs:
+  TrailArn:
+    Description: 'ARN of the CloudTrail'
+    Value: !GetAtt CloudTrail.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-trail-arn'
+
+  S3BucketName:
+    Description: 'Name of the S3 bucket for CloudTrail logs'
+    Value: !Ref CloudTrailS3Bucket
+    Export:
+      Name: !Sub '${AWS::StackName}-s3-bucket'
+
+  KMSKeyId:
+    Description: 'KMS Key ID for CloudTrail encryption'
+    Value: !Ref CloudTrailKMSKey
+    Export:
+      Name: !Sub '${AWS::StackName}-kms-key-id'
+
+  KMSKeyArn:
+    Description: 'KMS Key ARN for CloudTrail encryption'
+    Value: !GetAtt CloudTrailKMSKey.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-kms-key-arn'
+
+  CloudWatchLogGroupName:
+    Description: 'CloudWatch Log Group for CloudTrail'
+    Value: !Ref CloudTrailLogGroup
+    Export:
+      Name: !Sub '${AWS::StackName}-log-group'
+
+  CloudTrailLakeEventDataStoreArn:
+    Description: 'CloudTrail Lake Event Data Store ARN'
+    Value: !GetAtt CloudTrailLakeEventDataStore.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-lake-store-arn'
+
+  CloudTrailLakeEventDataStoreId:
+    Description: 'CloudTrail Lake Event Data Store ID'
+    Value: !Ref CloudTrailLakeEventDataStore
+    Export:
+      Name: !Sub '${AWS::StackName}-lake-store-id'
+
+  EstimatedMonthlyCost:
+    Description: 'Estimated monthly cost (USD) - varies based on usage'
+    Value: !Sub |
+      CloudTrail: ~$2 (first trail free)
+      S3 Storage: ~$0.023/GB (STANDARD), ~$0.004/GB (Glacier)
+      CloudTrail Lake: ~$2.5/GB ingested + $0.005/GB scanned
+      KMS: ~$1/month + $0.03/10k requests
+      CloudWatch Logs: ~$0.50/GB ingested + $0.03/GB stored
+      Data Events: ~$0.10/100k events (if enabled)
+      Total Estimate: ~$10-50/month depending on volume
