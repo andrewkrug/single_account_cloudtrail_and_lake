@@ -162,8 +162,8 @@ Resources:
     Properties:
       BucketName: !If
         - UseAutoSuffix
-        - !Sub '${S3BucketPrefix}-access-logs-${AWS::StackName}-${AWS::AccountId}-${AWS::Region}'
-        - !Sub '${S3BucketPrefix}-access-logs-${RandomSuffix}-${AWS::AccountId}'
+        - !Sub 'ct-logs-${RandomSuffix}-${AWS::AccountId}'
+        - !Sub 'ct-logs-${RandomSuffix}-${AWS::AccountId}'
       BucketEncryption:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault:
@@ -200,8 +200,8 @@ Resources:
     Properties:
       BucketName: !If
         - UseAutoSuffix
-        - !Sub '${S3BucketPrefix}-${AWS::StackName}-${AWS::AccountId}-${AWS::Region}'
-        - !Sub '${S3BucketPrefix}-${RandomSuffix}-${AWS::AccountId}'
+        - !Sub 'ct-main-${RandomSuffix}-${AWS::AccountId}'
+        - !Sub 'ct-main-${RandomSuffix}-${AWS::AccountId}'
       BucketEncryption:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault:

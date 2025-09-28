@@ -28,11 +28,11 @@ print_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
-# Generate unique suffix using timestamp and random string
+# Generate unique suffix using shorter timestamp and random string
 generate_unique_suffix() {
-    local timestamp=$(date +%Y%m%d%H%M%S)
-    local random_string=$(openssl rand -hex 4 2>/dev/null || xxd -l 4 -p /dev/urandom 2>/dev/null || echo $(($RANDOM * $RANDOM)))
-    echo "${timestamp}-${random_string}"
+    local timestamp=$(date +%m%d%H%M)
+    local random_string=$(openssl rand -hex 3 2>/dev/null || xxd -l 3 -p /dev/urandom 2>/dev/null || printf "%06x" $(($RANDOM * $RANDOM % 16777216)))
+    echo "${timestamp}${random_string}"
 }
 
 # Check if AWS CLI is installed and configured
