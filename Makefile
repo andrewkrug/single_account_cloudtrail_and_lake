@@ -7,7 +7,11 @@ TEMPLATE_FILE = cloudtrail-stack.yaml
 PROFILE ?= default
 
 # Detect CloudShell environment and adjust profile usage
-ifdef CLOUDSHELL
+# CloudShell sets AWS_CONTAINER_CREDENTIALS_FULL_URI to localhost:1338
+# and typically has /home/cloudshell-user as the home directory
+ifeq ($(shell echo $$AWS_CONTAINER_CREDENTIALS_FULL_URI | grep -q "127.0.0.1:1338" && echo true),true)
+    AWS_PROFILE_ARG =
+else ifeq ($(shell echo $$HOME | grep -q "cloudshell-user" && echo true),true)
     AWS_PROFILE_ARG =
 else
     AWS_PROFILE_ARG = --profile $(PROFILE)
