@@ -137,6 +137,9 @@ Resources:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault:
               SSEAlgorithm: 'AES256'
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: 'BucketOwnerPreferred'
       AccessControl: 'LogDeliveryWrite'
       PublicAccessBlockConfiguration:
         BlockPublicAcls: true
@@ -356,7 +359,7 @@ Resources:
             - Field: 'eventCategory'
               Equals:
                 - 'Management'
-        - Name: 'DataEvents'
+        - Name: 'S3DataEvents'
           FieldSelectors:
             - Field: 'eventCategory'
               Equals:
@@ -364,7 +367,21 @@ Resources:
             - Field: 'resources.type'
               Equals:
                 - 'AWS::S3::Object'
+        - Name: 'LambdaDataEvents'
+          FieldSelectors:
+            - Field: 'eventCategory'
+              Equals:
+                - 'Data'
+            - Field: 'resources.type'
+              Equals:
                 - 'AWS::Lambda::Function'
+        - Name: 'DynamoDBDataEvents'
+          FieldSelectors:
+            - Field: 'eventCategory'
+              Equals:
+                - 'Data'
+            - Field: 'resources.type'
+              Equals:
                 - 'AWS::DynamoDB::Table'
       KmsKeyId: !GetAtt CloudTrailKMSKey.Arn
       Tags:
